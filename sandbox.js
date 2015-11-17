@@ -5,21 +5,14 @@ if(in_sandbox){
   print("We’re sandboxed: here be dragons")
 }
 
-AppSandbox = function(context){
-  var scriptPath = context.scriptPath.substring(0, context.scriptPath.indexOf('\.sketchplugin/') + 1)
-  this.prefFile =  scriptPath + "sketchplugin/Contents/Resources/preferences.plist"
-  if (![fileManager fileExistsAtPath:this.prefFile]) {
-    var newDictionary = [NSDictionary dictionary]
-    [newDictionary writeToFile:this.prefFile atomically:true]
-  }
-}
-AppSandbox.prototype.authorize = function(path, callback){
+AppSandbox = function(){ }
+AppSandbox.prototype.open = function(path, callback){
   log("AppSandbox.authorize("+path+")")
   var success = false
 
   if (in_sandbox) {
     var url = [[[NSURL fileURLWithPath:path] URLByStandardizingPath] URLByResolvingSymlinksInPath],
-        allowedUrl = false
+        allowedURL = false
 
     // Key for bookmark data:
     var bd_key = this.key_for_url(url)
@@ -31,46 +24,93 @@ AppSandbox.prototype.authorize = function(path, callback){
     if(!bookmark){
       log("– No bookmark found, let's create one")
       var target = this.file_picker(url)
-      this.save_bookmark(target)
+      bookmark = [target bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope
+                      includingResourceValuesForKeys:nil
+                      relativeToURL:nil
+                      error:{}]
+      // Store bookmark
+      this.set_data_for_key(bookmark,bd_key)
     } else {
       log("– Bookmark found")
     }
-
     log("  " + bookmark)
 
     // Thanks to @joethephish for this pointer (pun totally intended)
     var bookmarkDataIsStalePtr = MOPointer.alloc().init()
-    var allowedUrl = [NSURL URLByResolvingBookmarkData:bookmark 
-                        options:NSURLBookmarkResolutionWithSecurityScope 
-                        relativeToURL:nil 
-                        bookmarkDataIsStale:bookmarkDataIsStalePtr 
-                        error:{}]
+    var allowedURL = [NSURL URLByResolvingBookmarkData:bookmark
+                            options:NSURLBookmarkResolutionWithSecurityScope
+                            relativeToURL:nil
+                            bookmarkDataIsStale:bookmarkDataIsStalePtr
+                            error:{}]
 
     if(bookmarkDataIsStalePtr.value() != 0){
       log("— Bookmark data is stale")
       log(bookmarkDataIsStalePtr.value())
     }
 
-    if(allowedUrl) {
+    if(allowedURL) {
       success = true
     }
   } else {
     success = true
   }
 
-  [allowedUrl startAccessingSecurityScopedResource]
+  // [allowedURL startAccessingSecurityScopedResource]
   callback.call(this,success)
-  // [allowedUrl stopAccessingSecurityScopedResource]
+  // [allowedURL stopAccessingSecurityScopedResource]
 }
-AppSandbox.prototype.save_bookmark = function(target) {
-  var bd_key = this.key_for_url(target)
-  bookmark = [target bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope
-                includingResourceValuesForKeys:nil
-                relativeToURL:nil
-                error:{}]
-  // Store bookmark
-  this.set_data_for_key(bookmark,bd_key)
+AppSandbox.prototype.authorize = function(path, callback){
+  log("AppSandbox.authorize("+path+")")
+  var success = false
 
+  if (in_sandbox) {
+    var url = [[[NSURL fileURLWithPath:path] URLByStandardizingPath] URLByResolvingSymlinksInPath],
+        allowedURL = false
+
+    // Key for bookmark data:
+    var bd_key = this.key_for_url(url)
+
+    // this.clear_key(bd_key) // For debug only, this clears the key we're looking for :P
+
+    // Bookmark
+    var bookmark = this.get_data_for_key(bd_key)
+    if(!bookmark){
+      log("– No bookmark found, let's create one")
+      var target = this.file_picker(url)
+      bookmark = [target bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope
+                      includingResourceValuesForKeys:nil
+                      relativeToURL:nil
+                      error:{}]
+      // Store bookmark
+      this.set_data_for_key(bookmark,bd_key)
+    } else {
+      log("– Bookmark found")
+    }
+    log("  " + bookmark)
+
+    // Thanks to @joethephish for this pointer (pun totally intended)
+    var bookmarkDataIsStalePtr = MOPointer.alloc().init()
+    var allowedURL = [NSURL URLByResolvingBookmarkData:bookmark
+                            options:NSURLBookmarkResolutionWithSecurityScope
+                            relativeToURL:nil
+                            bookmarkDataIsStale:bookmarkDataIsStalePtr
+                            error:{}]
+
+    if(bookmarkDataIsStalePtr.value() != 0){
+      log("— Bookmark data is stale")
+      log(bookmarkDataIsStalePtr.value())
+    }
+
+    if(allowedURL) {
+      success = true
+    }
+  } else {
+    success = true
+  }
+
+  [allowedURL startAccessingSecurityScopedResource]
+  callback.call(this,success)
+  // [allowedURL stopAccessingSecurityScopedResource]
 }
 AppSandbox.prototype.key_for_url = function(url){
   return "bd_" + [url absoluteString]
@@ -84,7 +124,7 @@ AppSandbox.prototype.file_picker = function(url){
   var openPanel = [NSOpenPanel openPanel]
 
   [openPanel setTitle:"Sketch Authorization"]
-  [openPanel setMessage:"Due to Apple's Sandboxing technology, Sketch needs your permission to write to this folder."];
+  [openPanel setMessage:"Due to App Store Sandboxing, Sketch needs your permission to access this folder."];
   [openPanel setPrompt:"Authorize"];
 
   [openPanel setCanCreateDirectories:false]
@@ -98,17 +138,17 @@ AppSandbox.prototype.file_picker = function(url){
 
   var openPanelButtonPressed = [openPanel runModal]
   if (openPanelButtonPressed == NSFileHandlingPanelOKButton) {
-    allowedUrl = [openPanel URL]
+    allowedURL = [openPanel URL]
   }
-  return allowedUrl
+  return allowedURL
 }
 
 AppSandbox.prototype.get_data_for_key = function(key){
-  var dictionary = [NSMutableDictionary dictionaryWithContentsOfFile:this.prefFile];
-  return [dictionary objectForKey:key]
+  var def = [NSUserDefaults standardUserDefaults]
+  return [def objectForKey:key]
 }
-AppSandbox.prototype.set_data_for_key = function(data,key) {
-  var dictionary = [NSMutableDictionary dictionaryWithContentsOfFile:this.prefFile];
-  [dictionary setObject:data forKey:key]
-  [dictionary writeToFile:this.prefFile atomically:true]
+
+AppSandbox.prototype.set_data_for_key = function(data,key){
+  var defaults = [NSUserDefaults standardUserDefaults];
+  [defaults setObject:data forKey:key];
 }
